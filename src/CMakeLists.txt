@@ -75,7 +75,9 @@ if (DDX_LIBRARY)
     endif()
 
     add_executable(ddx_driver ddx_driver.f90)
+    add_executable(test_gradients test_gradients.f90)
     target_link_libraries(ddx_driver PUBLIC ddx)
+    target_link_libraries(test_gradients PUBLIC ddx)
 
     #
     # Installation rules
