@@ -15,24 +15,36 @@ use ddx_core
 contains
 
 !> Compute the gradients of the ddCOSMO matrix
-subroutine contract_grad_L(params, constants, isph, sigma, xi, basloc, dbsloc, vplm, vcos, vsin, fx)
+subroutine contract_grad_L(params, constants, isph, sigma, xi, basloc, dbsloc, vplm, vcos, vsin, fx, dr)
 type(ddx_params_type), intent(in) :: params
     type(ddx_constants_type), intent(in) :: constants
       integer,                         intent(in)    :: isph
-      real(dp),  dimension(constants % nbasis, params % nsph), intent(in)    :: sigma
-      real(dp),  dimension(params % ngrid, params % nsph),       intent(in)    :: xi
-      real(dp),  dimension(constants % nbasis),      intent(inout) :: basloc, vplm
-      real(dp),  dimension(3, constants % nbasis),    intent(inout) :: dbsloc
-      real(dp),  dimension(params % lmax+1),      intent(inout) :: vcos, vsin
-      real(dp),  dimension(3),           intent(inout) :: fx
+      real(dp), dimension(constants % nbasis, params % nsph), intent(in)    :: sigma
+      real(dp), dimension(params % ngrid, params % nsph),       intent(in)    :: xi
+      real(dp), dimension(constants % nbasis), intent(inout) :: basloc, vplm
+      real(dp), dimension(3, constants % nbasis), intent(inout) :: dbsloc
+      real(dp), dimension(params % lmax+1), intent(inout) :: vcos, vsin
+      real(dp), dimension(3), intent(inout) :: fx
+      real(dp), optional, intent(inout) :: dr
 
-      call contract_gradi_Lik(params, constants, isph, sigma, xi(:, isph), basloc, dbsloc, vplm, vcos, vsin, fx )
-      call contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc, vplm, vcos, vsin, fx )
+      logical :: do_dr
+      real(dp) :: dr_local = 0.0d0
+
+      if (present(dr)) then
+          do_dr = .true.
+      else
+          do_dr = .false.
+      end if
+
+      call contract_gradi_Lik(params, constants, isph, sigma, xi(:, isph), basloc, dbsloc, vplm, vcos, vsin, fx, dr_local)
+      call contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc, vplm, vcos, vsin, fx, dr_local)
+
+      if (do_dr) dr = dr_local
 
 end subroutine contract_grad_L
 
 !> Contribution to the gradients of the ddCOSMO matrix
-subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc, vplm, vcos, vsin, fx )
+subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc, vplm, vcos, vsin, fx, dr)
     type(ddx_params_type), intent(in) :: params
     type(ddx_constants_type), intent(in) :: constants
       integer,                         intent(in)    :: isph
@@ -46,6 +58,7 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
       real(dp)  :: vvij, tij, xij, oij, t, fac, fl, f1, f2, f3, beta, tlow, thigh
       real(dp)  :: vij(3), sij(3), alp(3), va(3)
       real(dp), external :: dnrm2
+      real(dp), intent(inout) :: dr
       tlow  = one - pt5*(one - params % se)*params % eta
       thigh = one + pt5*(one + params % se)*params % eta
 
@@ -100,7 +113,7 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
 end subroutine contract_gradi_Lik
 
 !> Contribution to the gradients of the ddCOSMO matrix
-subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc, vplm, vcos, vsin, fx )
+subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc, vplm, vcos, vsin, fx, dr)
     type(ddx_params_type), intent(in) :: params
     type(ddx_constants_type), intent(in) :: constants
       integer,                         intent(in)    :: isph
@@ -118,6 +131,7 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
       real(dp)  :: vji(3), sji(3), alp(3), vb(3), vjk(3), sjk(3), vc(3)
       real(dp) :: rho, ctheta, stheta, cphi, sphi
       real(dp), external :: dnrm2
+      real(dp), intent(inout) :: dr
 
       tlow  = one - pt5*(one - params % se)*params % eta
       thigh = one + pt5*(one + params % se)*params % eta
@@ -207,16 +221,26 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
 end subroutine contract_gradi_Lji
 
 !> Gradient of the characteristic function U
-subroutine contract_grad_U(params, constants, isph, xi, phi, fx )
+subroutine contract_grad_U(params, constants, isph, xi, phi, fx, dr)
     type(ddx_params_type), intent(in) :: params
     type(ddx_constants_type), intent(in) :: constants
       integer,                        intent(in)    :: isph
       real(dp),  dimension(params % ngrid, params % nsph), intent(in)    :: xi, phi
       real(dp),  dimension(3),          intent(inout) :: fx
+      real(dp),  optional, intent(inout) :: dr
       integer :: ig, ji, jsph
       real(dp)  :: vvji, tji, fac, swthr
       real(dp)  :: alp(3), vji(3), sji(3)
       real(dp), external :: dnrm2
+      logical :: do_dr
+      real(dp) :: dr_local
+
+      if (present(dr)) then
+          do_dr = .true.
+      else
+          do_dr = .false.
+      end if
+
       do ig = 1, params % ngrid
         alp = zero
         if (constants % ui(ig,isph) .gt. zero .and. constants % ui(ig,isph).lt.one) then
