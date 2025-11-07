@@ -55,8 +55,9 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
       real(dp),  dimension(params % lmax+1),      intent(inout) :: vcos, vsin
       real(dp),  dimension(3),           intent(inout) :: fx
       integer :: ig, ij, jsph, l, ind, m
-      real(dp)  :: vvij, tij, xij, oij, t, fac, fl, f1, f2, f3, beta, tlow, thigh
+      real(dp)  :: vvij, tij, xij, oij, t, fac, fl, f1, fr1, f2, fr2, f3, fr3, beta, tlow, thigh
       real(dp)  :: vij(3), sij(3), alp(3), va(3)
+      real(dp) :: dsij, dtij(3), alp1(3), alp2(3), alp_rad, dsij_rad(3), dtij_rad, alp1_rad, alp2_rad, va_rad
       real(dp), external :: dnrm2
       real(dp), intent(inout) :: dr
       tlow  = one - pt5*(one - params % se)*params % eta
@@ -64,6 +65,7 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
 
       do ig = 1, params % ngrid
         va = zero
+        va_rad = zero
         do ij = constants % inl(isph), constants % inl(isph+1) - 1
           jsph = constants % nl(ij)
           vij  = params % csph(:,isph) + &
@@ -77,8 +79,23 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
           else
               sij = one
           end if
+
+          dsij = 1.0_dp / (tij*params%rsph(jsph)) !scalar
+          dtij(:) = sij(:)/params%rsph(jsph)      !vector
+
+          dsij_rad =  zero !constants%cgrid(:,ig)/vvij &
+            ! & - vij * dot_product(vij, constants%cgrid(:,ig)) / (vvij**3) !vector
+          dtij_rad = dot_product(vij, constants%cgrid(:,ig)) / (vvij* params%rsph(jsph)) !scalar
+
           call dbasis(params, constants, sij, basloc, dbsloc, vplm, vcos, vsin)
           alp  = zero
+          alp1 = zero
+          alp2 = zero
+
+          alp_rad  = zero
+          alp1_rad = zero
+          alp2_rad = zero
+      
           t    = one
           do l = 1, params % lmax
             ind = l*l + l + 1
@@ -87,7 +104,15 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
             do m = -l, l
               f2 = fac*sigma(ind+m,jsph)
               f1 = f2*fl*basloc(ind+m)
-              alp(:) = alp(:) + f1*sij(:) + f2*dbsloc(:,ind+m)
+
+              alp1(:) = f1*dtij
+              alp2(:) = f2*tij* dsij * dbsloc(:,ind+m)
+              alp(:) = alp(:) + alp1(:) + alp2(:)
+
+              alp1_rad = f1*dtij_rad 
+              alp2_rad = f2*tij * dot_product(dsij_rad, dbsloc(:,ind+m))
+              alp_rad = alp_rad + alp1_rad + alp2_rad
+
             end do
             t = t*tij
           end do
@@ -100,15 +125,18 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
             oij = xij
             f2  = zero
           end if
-          f1 = oij/params % rsph(jsph)
+          f1 = oij 
           va(:) = va(:) + f1*alp(:) + beta*f2*constants % zi(:,ig,isph)
+          va_rad = va_rad + f1*alp_rad + beta*f2*constants % zi_dr(ig,isph)
           if (tij .gt. tlow) then
-            f3 = beta*dfsw(tij,params % se,params % eta)/params % rsph(jsph)
+            f3 = beta*dfsw(tij,params % se,params % eta) 
             if (constants % fi(ig,isph).gt.one) f3 = f3/constants % fi(ig,isph)
-            va(:) = va(:) + f3*sij(:)
+            va(:) = va(:) + f3*dtij 
+            va_rad = va_rad + f3*dtij_rad
           end if
         end do
         fx = fx - constants % wgrid(ig)*xi(ig)*va(:)
+        dr = dr - constants % wgrid(ig)*xi(ig)*va_rad
       end do
 end subroutine contract_gradi_Lik
 
@@ -129,6 +157,7 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
       real(dp)  :: vvji, tji, xji, oji, t, fac, fl, f1, f2, beta, di, tlow, thigh
       real(dp)  :: b, g1, g2, vvjk, tjk, xjk
       real(dp)  :: vji(3), sji(3), alp(3), vb(3), vjk(3), sjk(3), vc(3)
+      real(dp) :: dsji, dtji(3), alp1(3), alp2(3), alp_rad, dsji_rad(3), dtji_rad, alp1_rad, alp2_rad, vb_rad, vc_rad
       real(dp) :: rho, ctheta, stheta, cphi, sphi
       real(dp), external :: dnrm2
       real(dp), intent(inout) :: dr
@@ -139,6 +168,10 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
       do ig = 1, params % ngrid
         vb = zero
         vc = zero
+
+        vb_rad = zero
+        vc_rad = zero
+
         do ji = constants % inl(isph), constants % inl(isph+1) - 1
           jsph = constants % nl(ji)
           vji  = params % csph(:,jsph) + &
@@ -152,9 +185,25 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
           else
               sji = one
           end if
+
+          dsji = 1.0_dp/(tji*params % rsph(isph))
+          dtji(:) = -sji/params % rsph(isph)
+
+          dsji_rad = constants%cgrid(:,ig)/vvji &
+            & - vji * dot_product(vji, constants%cgrid(:,ig)) / (vvji**3)
+          dtji_rad = -vvji/(params%rsph(isph)**2) 
+
           call dbasis(params, constants, sji, basloc, dbsloc, vplm, vcos, vsin)
-          alp = zero
-          t   = one
+          alp  = zero
+          alp1 = zero
+          alp2 = zero
+
+          alp_rad  = zero
+          alp1_rad = zero
+          alp2_rad = zero
+
+
+          t    = one
           do l = 1, params % lmax
             ind = l*l + l + 1
             fl  = dble(l)
@@ -162,18 +211,28 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
             do m = -l, l
               f2 = fac*sigma(ind+m,isph)
               f1 = f2*fl*basloc(ind+m)
-              alp = alp + f1*sji + f2*dbsloc(:,ind+m)
+
+              alp1(:) = f1*dtji 
+              alp2(:) = f2*tji* dsji * dbsloc(:,ind+m)
+              alp(:) = alp(:) - alp1(:) + alp2(:)
+
+              alp1_rad = f1*dtji_rad 
+              alp2_rad = f2*tji * dot_product(dsji_rad, dbsloc(:,ind+m))
+              alp_rad = alp_rad - alp1_rad + alp2_rad
+
             end do
             t = t*tji
-          end do
+          end do 
+
           xji = fsw(tji, params % se, params % eta)
           if (constants % fi(ig,jsph).gt.one) then
             oji = xji/constants % fi(ig,jsph)
           else
             oji = xji
           end if
-          f1 = oji/params % rsph(isph)
+          f1 = oji 
           vb = vb + f1*alp*xi(ig,jsph)
+          vb_rad = vb_rad + f1*alp_rad*xi(ig,jsph)
           if (tji .gt. tlow) then
             beta = intmlp(params, constants, tji, sigma(:,isph), basloc)
             if (constants % fi(ig,jsph) .gt. one) then
@@ -204,21 +263,26 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
                 end if
               end do
               if (proc) then
-                g1 = di*di*dfsw(tji, params % se, params % eta)/params % rsph(isph)
+                g1 = di*di*dfsw(tji, params % se, params % eta) 
                 g2 = g1*xi(ig,jsph)*b
-                vc = vc + g2*sji
+                vc = vc - g2*dtji 
+                vc_rad = vc_rad - g2*dtji_rad
               end if
             else
               di  = one
               fac = zero
             end if
-            f2 = (one-fac)*di*dfsw(tji, params % se, params % eta)/params % rsph(isph)
-            vb = vb + f2*xi(ig,jsph)*beta*sji
+            f2 = (one-fac)*di*dfsw(tji, params % se, params % eta) 
+            vb = vb - f2*xi(ig,jsph)*beta*dtji 
+            vb_rad = vb_rad - f2*xi(ig,jsph)*beta*dtji_rad
           end if
         end do
         fx = fx + constants % wgrid(ig)*(vb - vc)
+        dr = dr + constants % wgrid(ig)*(vb_rad - vc_rad)
       end do
 end subroutine contract_gradi_Lji
+
+
 
 !> Gradient of the characteristic function U
 subroutine contract_grad_U(params, constants, isph, xi, phi, fx, dr)
@@ -230,7 +294,8 @@ subroutine contract_grad_U(params, constants, isph, xi, phi, fx, dr)
       real(dp),  optional, intent(inout) :: dr
       integer :: ig, ji, jsph
       real(dp)  :: vvji, tji, fac, swthr
-      real(dp)  :: alp(3), vji(3), sji(3)
+      real(dp)  :: alp(3), vji(3), sji(3), dtji(3)
+      real(dp) :: dtji_rad, alp_rad
       real(dp), external :: dnrm2
       logical :: do_dr
       real(dp) :: dr_local
@@ -243,8 +308,10 @@ subroutine contract_grad_U(params, constants, isph, xi, phi, fx, dr)
 
       do ig = 1, params % ngrid
         alp = zero
+        alp_rad = zero
         if (constants % ui(ig,isph) .gt. zero .and. constants % ui(ig,isph).lt.one) then
           alp = alp + phi(ig,isph)*xi(ig,isph)*constants % zi(:,ig,isph)
+          alp_rad = alp_rad + phi(ig,isph)*xi(ig,isph)*constants % zi_dr(ig,isph)
         end if
         do ji = constants % inl(isph), constants % inl(isph+1) - 1
           jsph  = constants % nl(ji)
@@ -257,11 +324,21 @@ subroutine contract_grad_U(params, constants, isph, xi, phi, fx, dr)
           swthr = one + (params % se + 1.d0)*params % eta / 2.d0
           if (tji.lt.swthr .and. tji.gt.swthr-params % eta .and. constants % ui(ig,jsph).gt.zero) then
             sji = vji/vvji
-            fac = - dfsw(tji, params % se, params % eta)/params % rsph(isph)
-            alp = alp + fac*phi(ig,jsph)*xi(ig,jsph)*sji
+            dtji = - sji / params % rsph(isph)
+            dtji_rad = - vvji/(params%rsph(isph)**2) 
+            ! dtji_rad = dot_product(vji, constants%cgrid(:,ig)) / (vvji* params%rsph(isph)) 
+            fac = dfsw(tji, params % se, params % eta) 
+            alp = alp + fac*phi(ig,jsph)*xi(ig,jsph) * dtji 
+            alp_rad = alp_rad + fac*phi(ig,jsph)*xi(ig,jsph) * dtji_rad
           end if
         end do
-        fx = fx - constants % wgrid(ig)*alp
+      !   fx = fx - constants % wgrid(ig)*alp
+        if (present(dr)) then
+         dr = dr - constants % wgrid(ig)*alp_rad
+        else 
+         fx = fx - constants % wgrid(ig)*alp
+      end if
+
       end do
 end subroutine contract_grad_U
 
@@ -2260,5 +2337,29 @@ subroutine zeta_grad(params, constants, state, e_cav, forces)
         end do
     end do
 end subroutine zeta_grad
+
+!> Force term: interaction of the external electric field with the zeta
+!! intermediate. This routine is called by the gradients of ddCOSMO
+!! ddPCM and ddLPB.
+subroutine zeta_grad_dr(params, constants, state, e_cav, dr)
+    implicit none
+    type(ddx_params_type), intent(in) :: params
+    type(ddx_constants_type), intent(in) :: constants
+    type(ddx_state_type), intent(inout) :: state
+    real(dp), intent(inout) :: dr(params % nsph)
+    real(dp), intent(in) :: e_cav(3, constants % ncav)
+    ! local variables
+    integer :: icav, isph, igrid
+
+    icav = 0
+    do isph = 1, params % nsph
+        do igrid = 1, params % ngrid
+            if (constants % ui(igrid, isph) .eq. zero) cycle
+            icav = icav + 1
+            dr(isph) = dr(isph) + pt5 &
+                & * dot_product(constants % cgrid(:,igrid), e_cav(:, icav))*state % zeta(icav)
+        end do
+    end do
+end subroutine zeta_grad_dr
 
 end module ddx_gradients

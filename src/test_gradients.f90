@@ -38,6 +38,7 @@ real(dp), allocatable :: grad_xpsi(:,:), grad_slx(:,:), &
     & dr_xpsi_num(:), dr_slx_num(:), dr_sphi_num(:)
 real(dp), external :: ddot
 
+
 call get_command_argument(1, fname)
 call ddfromfile(fname, ddx_data, tol, charges, ddx_error)
 call check_error(ddx_error)
@@ -71,6 +72,7 @@ if (info .ne. 0) then
     write(6, *) "Allocation failed in ddx_driver"
     stop 1
 end if
+
 multipoles(1, :) = charges/sqrt4pi
 call multipole_electrostatics(ddx_data % params, ddx_data % constants, &
     & ddx_data % workspace, multipoles, 0, electrostatics, ddx_error)
@@ -83,8 +85,12 @@ if (info .ne. 0) then
 end if
 call multipole_psi(ddx_data % params, multipoles, 0, psi)
 
+
 ! Reference calculation
+! call draco(ddx_data%params%csph, ddx_data%params%nsph, &
+   !  & ddx_data%params%rsph)
 call ddrun(ddx_data,state,electrostatics,psi,tol,esolv,ddx_error,force)
+
 
 x(:,:) = state%xs(:,:)
 s(:,:) = state%s(:,:)
@@ -108,17 +114,24 @@ if (abs(esolv - (xpsi + slx + sphi)).gt.1e-10) then
     stop 1
 end if
 
+
 call sgradlx(ddx_data%params,ddx_data%constants,ddx_data%workspace, &
     & state,grad_slx,ddx_error)
 
 call sgradphi(ddx_data%params,ddx_data%constants,ddx_data%workspace, &
     & state,grad_sphi,ddx_error,electrostatics%e_cav,multipoles)
 
+call sdrlx(ddx_data%params,ddx_data%constants,ddx_data%workspace, &
+    & state,grad_slx,dr_slx,ddx_error)
+
+call sdrphi(ddx_data%params,ddx_data%constants,ddx_data%workspace, &
+    & state,grad_sphi,dr_sphi,ddx_error,electrostatics%e_cav,multipoles)
+
 do isph = 1, ddx_data%params%nsph
     do j = 1, 3
         ddx_data%params%csph(j,isph) = ddx_data%params%csph(j,isph) - step
         call displaced_run(ddx_data,multipoles,tol,xpsi,slx,sphi,psi, &
-            & esolv,force,x,s)
+             & esolv,force,x,s)
 
         grad_xpsi_num(j, isph) = - xpsi
         grad_slx_num(j, isph) = - slx
@@ -139,8 +152,36 @@ do isph = 1, ddx_data%params%nsph
     end do
 end do
 
-write(6,*) "Difference S^T grad L X", minval(abs(grad_slx_num - grad_slx))
+write(6,*) "Difference S^T grad L X", maxval(abs(grad_slx_num - grad_slx))
 write(6,*) "Difference S^T grad Phi", maxval(abs(grad_sphi_num - grad_sphi))
+
+
+do isph = 1, ddx_data%params%nsph
+        ddx_data%params%rsph(isph) = ddx_data%params%rsph(isph) - step
+        call displaced_run(ddx_data,multipoles,tol,xpsi,slx,sphi,psi, &
+             & esolv,force,x,s)
+
+        dr_xpsi_num( isph) = - xpsi
+        dr_slx_num(isph) = - slx
+        dr_sphi_num( isph) = - sphi
+
+        ddx_data%params%rsph(isph) = ddx_data%params%rsph(isph) + 2.0d0*step
+        call displaced_run(ddx_data,multipoles,tol,xpsi,slx,sphi,psi, &
+            & esolv,force,x,s)
+
+        dr_xpsi_num( isph) = dr_xpsi_num( isph) + xpsi
+        dr_slx_num(isph) = dr_slx_num(isph) + slx
+        dr_sphi_num( isph) = dr_sphi_num(isph) + sphi
+        dr_xpsi_num( isph) = dr_xpsi_num(isph)/(2.0d0*step)
+        dr_slx_num(isph) = dr_slx_num( isph)/(2.0d0*step)
+        dr_sphi_num( isph) = dr_sphi_num(isph)/(2.0d0*step)
+
+        ddx_data%params%rsph(isph) = ddx_data%params%rsph(isph) - step
+end do
+
+write(6,*) "-----" 
+write(6,*) "Difference S^T grad L X", maxval(abs(dr_slx_num - dr_slx))
+write(6,*) "Difference S^T grad Phi", maxval(abs(dr_sphi_num - dr_sphi))
 
 deallocate(psi, multipoles, charges, force, numforce, dr, numdr,&
     & x, s, tmp_lx, &
@@ -193,6 +234,7 @@ subroutine displaced_run(ddx_data,multipoles,tol,xpsi,slx,sphi, &
         & error2)
     call check_error(error2)
 
+
     call multipole_electrostatics(ddx_data2%params,ddx_data2%constants, &
         & ddx_data2%workspace,multipoles,0,electrostatics2,error2)
     call check_error(error2)
@@ -237,6 +279,30 @@ subroutine sgradlx(params, constants, workspace, &
     force = -pt5*force
 end subroutine sgradlx
 
+subroutine sdrlx(params, constants, workspace, &
+        & state, force, dr, ddx_error)
+    implicit none
+    type(ddx_params_type), intent(in) :: params
+    type(ddx_constants_type), intent(in) :: constants
+    type(ddx_workspace_type), intent(inout) :: workspace
+    type(ddx_state_type), intent(inout) :: state
+    type(ddx_error_type), intent(inout) :: ddx_error
+    real(dp), intent(inout) :: force(3, params % nsph)
+    real(dp), intent(inout) :: dr(params % nsph)
+    integer :: isph
+    force = zero
+    dr = zero
+    do isph = 1, params % nsph
+        call contract_grad_l(params,constants,isph,state%xs, &
+            & state%sgrid,workspace%tmp_vylm(:,1), &
+            & workspace%tmp_vdylm(:,:,1),workspace%tmp_vplm(:,1), &
+            & workspace%tmp_vcos(:,1),workspace%tmp_vsin(:,1), &
+            & force(:,isph), dr=dr(isph))
+    end do
+    dr = -pt5*dr
+    force = -pt5*force
+end subroutine sdrlx
+
 subroutine sgradphi(params, constants, workspace, &
         & state,force,ddx_error,e_cav,multipoles)
     implicit none
@@ -259,5 +325,87 @@ subroutine sgradphi(params, constants, workspace, &
     call multipole_force_terms(params,constants, &
         & workspace,state,0,multipoles,force,ddx_error)
 end subroutine sgradphi
+
+
+subroutine sdrphi(params, constants, workspace, &
+        & state,force,dr,ddx_error,e_cav,multipoles)
+    implicit none
+    type(ddx_params_type), intent(in) :: params
+    type(ddx_constants_type), intent(in) :: constants
+    type(ddx_workspace_type), intent(inout) :: workspace
+    type(ddx_state_type), intent(inout) :: state
+    type(ddx_error_type), intent(inout) :: ddx_error
+    real(dp), intent(inout) :: force(3, params % nsph)
+    real(dp), intent(inout) :: dr(params % nsph)
+    real(dp), intent(in) :: e_cav(3, constants % ncav)
+    real(dp), intent(in) :: multipoles(1, ddx_data % params % nsph)
+    integer :: isph
+    dr = zero
+    do isph = 1, params % nsph
+        call contract_grad_u(params, constants, isph, state % sgrid, &
+            & state % phi_grid, force(:, isph), dr=dr(isph))
+    end do
+    dr = -pt5*dr
+    call zeta_grad_dr(params, constants, state, e_cav, dr)
+end subroutine sdrphi
+
+
+
+
+! subroutine draco(xyz, nat, rvdw)
+!    real(dp), intent(in) :: xyz(:, :)
+!    real(dp), intent(inout) :: rvdw(:)
+!    integer, intent(in) :: nat
+!                                        !    x/y/z,  I,  A
+!    real(dp), allocatable :: cn(:), dcndr(:,:,:)
+
+!    allocate(cn(nat))
+
+!    call ncoord_dexp(nat, xyz, cn)
+
+!    rvdw = 7.0_dp !+ cn / 2.0_dp
+
+! end subroutine draco
+
+
+
+! subroutine ncoord_dexp(nat, xyz, cn)
+
+!    !> Molecular structure data
+!    integer, intent(in) :: nat   
+!    real(dp), intent(in), dimension(3, nat) :: xyz
+
+!    !> Error function coordination number.
+!    real(dp), intent(out) :: cn(:)
+
+
+!    integer :: iat, jat, itr
+!    real(dp) :: r2, r1, rc, rij(3)
+
+!    real(dp) :: kcn
+
+!    kcn = 0.5_dp
+
+!    cn(:) = 0.0_dp
+
+!    do iat = 1, nat
+!       do jat = 1, nat
+
+!          if (iat /= jat) then
+
+!             rij = xyz(:, iat) - xyz(:, jat)
+!             r2 = sum(rij**2)
+!             r1 = sqrt(r2)
+
+!             cn(iat) = cn(iat) + exp(-kcn * (1.0_dp - r1))
+
+
+!          end if 
+
+!       end do
+!    end do
+
+! end subroutine ncoord_dexp
+
 
 end program test_gradients
