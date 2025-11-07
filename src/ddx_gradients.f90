@@ -60,6 +60,7 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
       real(dp) :: dsij, dtij(3), alp1(3), alp2(3), alp_rad, dsij_rad(3), dtij_rad, alp1_rad, alp2_rad, va_rad
       real(dp), external :: dnrm2
       real(dp), intent(inout) :: dr
+      real(dp) :: sjac(3,3), qij
       tlow  = one - pt5*(one - params % se)*params % eta
       thigh = one + pt5*(one + params % se)*params % eta
 
@@ -83,6 +84,19 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
           dsij = 1.0_dp / (tij*params%rsph(jsph)) !scalar
           dtij(:) = sij(:)/params%rsph(jsph)      !vector
 
+          ! build the jacobian of sik
+          sjac = zero
+          sjac(1,1) = one
+          sjac(2,2) = one
+          sjac(3,3) = one
+          qij = one/vvij
+          do icomp = 1, 3
+              do jcomp = 1, 3
+              sjac(icomp,jcomp) = qij*(sjac(icomp,jcomp) &
+                  & - sij(icomp)*sij(jcomp))
+              end do
+          end do
+
           dsij_rad =  zero !constants%cgrid(:,ig)/vvij &
             ! & - vij * dot_product(vij, constants%cgrid(:,ig)) / (vvij**3) !vector
           dtij_rad = dot_product(vij, constants%cgrid(:,ig)) / (vvij* params%rsph(jsph)) !scalar
@@ -95,7 +109,7 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
           alp_rad  = zero
           alp1_rad = zero
           alp2_rad = zero
-      
+
           t    = one
           do l = 1, params % lmax
             ind = l*l + l + 1
@@ -106,12 +120,18 @@ subroutine contract_gradi_Lik(params, constants, isph, sigma, xi, basloc, dbsloc
               f1 = f2*fl*basloc(ind+m)
 
               alp1(:) = f1*dtij
-              alp2(:) = f2*tij* dsij * dbsloc(:,ind+m)
+              alp2(1) = sjac(1,1)*dbsloc(1,ind+m) + &
+                  & sjac(1,2)*dbsloc(2,ind+m) + sjac(1,3)*dbsloc(3,ind+m)
+              alp2(2) = sjac(2,1)*dbsloc(1,ind+m) + &
+                  & sjac(2,2)*dbsloc(2,ind+m) + sjac(2,3)*dbsloc(3,ind+m)
+              alp2(3) = sjac(3,1)*dbsloc(1,ind+m) + &
+                  & sjac(3,2)*dbsloc(2,ind+m) + sjac(3,3)*dbsloc(3,ind+m)
+              alp2(:) = alp2(:)*tij*f2
               alp(:) = alp(:) + alp1(:) + alp2(:)
 
               alp1_rad = f1*dtij_rad 
               alp2_rad = f2*tij * dot_product(dsij_rad, dbsloc(:,ind+m))
-              alp_rad = alp_rad + alp1_rad + alp2_rad
+              alp_rad = alp_rad - alp1_rad - alp2_rad
 
             end do
             t = t*tij
@@ -161,6 +181,7 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
       real(dp) :: rho, ctheta, stheta, cphi, sphi
       real(dp), external :: dnrm2
       real(dp), intent(inout) :: dr
+      real(dp) :: sjac(3,3), qji
 
       tlow  = one - pt5*(one - params % se)*params % eta
       thigh = one + pt5*(one + params % se)*params % eta
@@ -186,6 +207,19 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
               sji = one
           end if
 
+          ! build the jacobian of sji
+          sjac = zero
+          sjac(1,1) = - one
+          sjac(2,2) = - one
+          sjac(3,3) = - one
+          qji = one/vvji
+          do icomp = 1, 3
+              do jcomp = 1, 3
+                  sjac(icomp,jcomp) = qji*(sjac(icomp,jcomp) &
+                      & + sji(icomp)*sji(jcomp))
+              end do
+          end do
+
           dsji = 1.0_dp/(tji*params % rsph(isph))
           dtji(:) = -sji/params % rsph(isph)
 
@@ -202,7 +236,6 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
           alp1_rad = zero
           alp2_rad = zero
 
-
           t    = one
           do l = 1, params % lmax
             ind = l*l + l + 1
@@ -212,17 +245,24 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
               f2 = fac*sigma(ind+m,isph)
               f1 = f2*fl*basloc(ind+m)
 
-              alp1(:) = f1*dtji 
-              alp2(:) = f2*tji* dsji * dbsloc(:,ind+m)
-              alp(:) = alp(:) - alp1(:) + alp2(:)
+              alp1(:) = f1*dtji
+              alp2(1) = sjac(1,1)*dbsloc(1,ind+m) + &
+                  & sjac(1,2)*dbsloc(2,ind+m) + sjac(1,3)*dbsloc(3,ind+m)
+              alp2(2) = sjac(2,1)*dbsloc(1,ind+m) + &
+                  & sjac(2,2)*dbsloc(2,ind+m) + sjac(2,3)*dbsloc(3,ind+m)
+              alp2(3) = sjac(3,1)*dbsloc(1,ind+m) + &
+                  & sjac(3,2)*dbsloc(2,ind+m) + sjac(3,3)*dbsloc(3,ind+m)
+              alp2(:) = alp2(:)*tji*f2
 
-              alp1_rad = f1*dtji_rad 
+              alp(:) = alp(:) - alp1(:) - alp2(:)
+
+              alp1_rad = f1*dtji_rad
               alp2_rad = f2*tji * dot_product(dsji_rad, dbsloc(:,ind+m))
               alp_rad = alp_rad - alp1_rad + alp2_rad
 
             end do
             t = t*tji
-          end do 
+          end do
 
           xji = fsw(tji, params % se, params % eta)
           if (constants % fi(ig,jsph).gt.one) then
@@ -230,9 +270,8 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
           else
             oji = xji
           end if
-          f1 = oji 
-          vb = vb + f1*alp*xi(ig,jsph)
-          vb_rad = vb_rad + f1*alp_rad*xi(ig,jsph)
+          vb = vb + oji*alp*xi(ig,jsph)
+          vb_rad = vb_rad + oji*alp_rad*xi(ig,jsph)
           if (tji .gt. tlow) then
             beta = intmlp(params, constants, tji, sigma(:,isph), basloc)
             if (constants % fi(ig,jsph) .gt. one) then
@@ -265,7 +304,7 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
               if (proc) then
                 g1 = di*di*dfsw(tji, params % se, params % eta) 
                 g2 = g1*xi(ig,jsph)*b
-                vc = vc - g2*dtji 
+                vc = vc - g2*dtji
                 vc_rad = vc_rad - g2*dtji_rad
               end if
             else
@@ -273,7 +312,7 @@ subroutine contract_gradi_Lji(params, constants, isph, sigma, xi, basloc, dbsloc
               fac = zero
             end if
             f2 = (one-fac)*di*dfsw(tji, params % se, params % eta) 
-            vb = vb - f2*xi(ig,jsph)*beta*dtji 
+            vb = vb - f2*xi(ig,jsph)*beta*dtji
             vb_rad = vb_rad - f2*xi(ig,jsph)*beta*dtji_rad
           end if
         end do
