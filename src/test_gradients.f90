@@ -173,15 +173,15 @@ do isph = 1, ddx_data%params%nsph
         dr_slx_num(isph) = dr_slx_num(isph) + slx
         dr_sphi_num( isph) = dr_sphi_num(isph) + sphi
         dr_xpsi_num( isph) = dr_xpsi_num(isph)/(2.0d0*step)
-        dr_slx_num(isph) = dr_slx_num( isph)/(2.0d0*step)
+        dr_slx_num(isph) = dr_slx_num(isph)/(2.0d0*step)
         dr_sphi_num( isph) = dr_sphi_num(isph)/(2.0d0*step)
 
         ddx_data%params%rsph(isph) = ddx_data%params%rsph(isph) - step
 end do
 
-write(6,*) "-----" 
-write(6,*) "Difference S^T grad L X", maxval(abs(dr_slx_num - dr_slx))
-write(6,*) "Difference S^T grad Phi", maxval(abs(dr_sphi_num - dr_sphi))
+write(6,*) "-----"
+write(6,*) "Difference S^T dr L X", maxval(abs(dr_slx_num - dr_slx))
+write(6,*) "Difference S^T dr Phi", maxval(abs(dr_sphi_num - dr_sphi))
 
 deallocate(psi, multipoles, charges, force, numforce, dr, numdr,&
     & x, s, tmp_lx, &

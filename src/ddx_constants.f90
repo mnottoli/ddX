@@ -994,7 +994,8 @@ subroutine constants_geometry_init(params, constants, ddx_error)
                         constants % zi(:, igrid, isph) = &
                             & constants % zi(:, igrid, isph) + vv*v
                         constants % zi_dr(igrid, isph) = &
-                            & constants % zi_dr(igrid, isph) + vv*dot_product(v, constants % cgrid(:, igrid))
+                            & constants % zi_dr(igrid, isph) &
+                            & + vv*dot_product(v, constants % cgrid(:, igrid))
                     end if
                 end if
             enddo
