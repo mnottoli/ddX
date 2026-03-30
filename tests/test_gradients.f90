@@ -31,12 +31,13 @@ real(dp), allocatable :: psi(:, :), force(:, :), charges(:), &
 real(dp) :: tol, esolv, start_time, finish_time
 integer :: i, isph, info, j
 real(dp), allocatable :: x(:,:), s(:,:), tmp_lx(:,:)
-real(dp) :: xpsi, slx, sphi
+real(dp) :: xpsi, slx, sphi, diff
 real(dp), allocatable :: grad_xpsi(:,:), grad_slx(:,:), &
     & grad_sphi(:,:), grad_xpsi_num(:,:), grad_slx_num(:,:), &
     & grad_sphi_num(:,:), dr_xpsi(:), dr_slx(:), dr_sphi(:), &
     & dr_xpsi_num(:), dr_slx_num(:), dr_sphi_num(:)
 real(dp), external :: ddot
+real(dp), parameter :: threshold = 1e-8
 
 
 call get_command_argument(1, fname)
@@ -109,7 +110,8 @@ sphi = pt5*ddot(ddx_data%constants%n,s,1,state%phi,1)
 
 write(6,*) xpsi, slx, sphi
 ! Check if the Lagrangian formulation returns the energy
-if (abs(esolv - (xpsi + slx + sphi)).gt.1e-10) then
+diff = abs(esolv - (xpsi + slx + sphi))
+if (diff.gt.threshold) then
     write(6, *) "Inconsistency"
     stop 1
 end if
@@ -152,8 +154,19 @@ do isph = 1, ddx_data%params%nsph
     end do
 end do
 
-write(6,*) "Difference S^T grad L X", maxval(abs(grad_slx_num - grad_slx))
-write(6,*) "Difference S^T grad Phi", maxval(abs(grad_sphi_num - grad_sphi))
+diff = maxval(abs(grad_slx_num - grad_slx))
+write(6,*) "Difference S^T grad L X", diff
+if (diff.gt.threshold) then
+    write(6, *) "Inconsistency"
+    stop 1
+end if
+
+diff = maxval(abs(grad_sphi_num - grad_sphi))
+write(6,*) "Difference S^T grad Phi", diff
+if (diff.gt.threshold) then
+    write(6, *) "Inconsistency"
+    stop 1
+end if
 
 
 do isph = 1, ddx_data%params%nsph
@@ -180,8 +193,18 @@ do isph = 1, ddx_data%params%nsph
 end do
 
 write(6,*) "-----"
-write(6,*) "Difference S^T dr L X", maxval(abs(dr_slx_num - dr_slx))
-write(6,*) "Difference S^T dr Phi", maxval(abs(dr_sphi_num - dr_sphi))
+diff = maxval(abs(dr_slx_num - dr_slx))
+write(6,*) "Difference S^T dr L X", diff
+if (diff.gt.threshold) then
+    write(6, *) "Inconsistency"
+    stop 1
+end if
+diff = maxval(abs(dr_sphi_num - dr_sphi))
+write(6,*) "Difference S^T dr Phi", diff
+if (diff.gt.threshold) then
+    write(6, *) "Inconsistency"
+    stop 1
+end if
 
 deallocate(psi, multipoles, charges, force, numforce, dr, numdr,&
     & x, s, tmp_lx, &
@@ -348,64 +371,5 @@ subroutine sdrphi(params, constants, workspace, &
     dr = -pt5*dr
     call zeta_grad_dr(params, constants, state, e_cav, dr)
 end subroutine sdrphi
-
-
-
-
-! subroutine draco(xyz, nat, rvdw)
-!    real(dp), intent(in) :: xyz(:, :)
-!    real(dp), intent(inout) :: rvdw(:)
-!    integer, intent(in) :: nat
-!                                        !    x/y/z,  I,  A
-!    real(dp), allocatable :: cn(:), dcndr(:,:,:)
-
-!    allocate(cn(nat))
-
-!    call ncoord_dexp(nat, xyz, cn)
-
-!    rvdw = 7.0_dp !+ cn / 2.0_dp
-
-! end subroutine draco
-
-
-
-! subroutine ncoord_dexp(nat, xyz, cn)
-
-!    !> Molecular structure data
-!    integer, intent(in) :: nat   
-!    real(dp), intent(in), dimension(3, nat) :: xyz
-
-!    !> Error function coordination number.
-!    real(dp), intent(out) :: cn(:)
-
-
-!    integer :: iat, jat, itr
-!    real(dp) :: r2, r1, rc, rij(3)
-
-!    real(dp) :: kcn
-
-!    kcn = 0.5_dp
-
-!    cn(:) = 0.0_dp
-
-!    do iat = 1, nat
-!       do jat = 1, nat
-
-!          if (iat /= jat) then
-
-!             rij = xyz(:, iat) - xyz(:, jat)
-!             r2 = sum(rij**2)
-!             r1 = sqrt(r2)
-
-!             cn(iat) = cn(iat) + exp(-kcn * (1.0_dp - r1))
-
-
-!          end if 
-
-!       end do
-!    end do
-
-! end subroutine ncoord_dexp
-
 
 end program test_gradients
